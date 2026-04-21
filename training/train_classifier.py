@@ -20,7 +20,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import yaml
 
-from data.classifier_dataset import build_classifier_dataloaders, CLASS_NAMES
+from data.ct_hemorrhage_dataset import build_ct_classifier_dataloaders, CT_CLASS_NAMES
 from models.classifier import StrokeClassifier
 from training.metrics import accuracy, cls_report, conf_matrix
 
@@ -95,10 +95,10 @@ def main(args):
     print(f"\n디바이스: {device}")
     print(f"설정: epochs={epochs}, batch={batch_size}, lr={lr}, img={image_size}\n")
 
-    cache_dir = cfg["data"].get("tekno21_cache", None)
-    print("데이터셋 로딩 (tekno21 HuggingFace)...")
-    train_loader, val_loader, class_weights = build_classifier_dataloaders(
-        image_size=image_size, batch_size=batch_size, cache_dir=cache_dir
+    ct_path = cfg["data"]["ct_hemorrhage_path"]
+    print(f"데이터셋 로딩 (CT Hemorrhage): {ct_path}")
+    train_loader, val_loader, class_weights = build_ct_classifier_dataloaders(
+        data_root=ct_path, image_size=image_size, batch_size=batch_size
     )
     print(f"학습: {len(train_loader.dataset)}개  검증: {len(val_loader.dataset)}개\n")
 
@@ -135,7 +135,7 @@ def main(args):
                 "epoch": epoch,
                 "model_state": model.state_dict(),
                 "val_acc": val_acc,
-                "class_names": CLASS_NAMES,
+                "class_names": CT_CLASS_NAMES,
                 "config": c,
             }, save_path / "best_classifier.pth")
             print(f"  → 모델 저장 (best val acc: {best_acc:.4f})")
@@ -146,7 +146,7 @@ def main(args):
                 break
 
     print(f"\n최종 검증 리포트 (best model):")
-    print(cls_report(val_preds, val_labels, CLASS_NAMES))
+    print(cls_report(val_preds, val_labels, CT_CLASS_NAMES))
     print("Confusion matrix:")
     print(conf_matrix(val_preds, val_labels))
     print(f"\n학습 완료. 저장 경로: {save_path / 'best_classifier.pth'}")

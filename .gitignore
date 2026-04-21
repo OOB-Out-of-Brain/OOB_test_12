@@ -9,3 +9,4 @@ data/processed/
 results/
 
 .DS_Store
+.vscode/

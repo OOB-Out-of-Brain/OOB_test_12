@@ -17,7 +17,6 @@ import torch
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from data.classifier_dataset import CLASS_NAMES
 from models.classifier import StrokeClassifier
 from models.segmentor import StrokeSegmentor
 
@@ -93,8 +92,9 @@ class StrokePipeline:
     def _load_classifier(self, ckpt_path: str) -> StrokeClassifier:
         ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=True)
         cfg = ckpt.get("config", {})
+        self.class_names = ckpt.get("class_names", cfg.get("class_names", ["normal", "hemorrhagic"]))
         model = StrokeClassifier(
-            num_classes=cfg.get("num_classes", 3),
+            num_classes=len(self.class_names),
             pretrained=False,
             dropout_rate=cfg.get("dropout_rate", 0.3),
         )
@@ -126,31 +126,37 @@ class StrokePipeline:
 
         pred_idx = pred_idx.item()
         probs_np = probs.cpu().numpy()[0]
-        class_name = CLASS_NAMES[pred_idx]
+        class_name = self.class_names[pred_idx]
 
         result = PipelineResult(
             class_idx=pred_idx,
             class_name=class_name,
             confidence=float(probs_np[pred_idx]),
-            class_probs={name: float(p) for name, p in zip(CLASS_NAMES, probs_np)},
+            class_probs={name: float(p) for name, p in zip(self.class_names, probs_np)},
         )
 
-        # ── 2단계: 분할 (허혈성 / 출혈성) ──────────────────────────────────
-        if class_name in ("ischemic", "hemorrhagic"):
-            seg_tensor = self.seg_transform(image=orig_np)["image"].unsqueeze(0).to(self.device)
-            mask_tensor = self.segmentor.predict_mask(seg_tensor, self.seg_threshold)
-            # seg_size → 원본 크기로 복원
-            mask_resized = self._resize_mask(
-                mask_tensor[0, 0].cpu().numpy(),
-                target_h=orig_np.shape[0],
-                target_w=orig_np.shape[1],
-            )
-            total_px = orig_np.shape[0] * orig_np.shape[1]
-            lesion_px = int(mask_resized.sum())
+        # ── 2단계: 세그멘테이션 (항상 실행) ────────────────────────────────
+        seg_tensor = self.seg_transform(image=orig_np)["image"].unsqueeze(0).to(self.device)
+        mask_tensor = self.segmentor.predict_mask(seg_tensor, self.seg_threshold)
+        mask_resized = self._resize_mask(
+            mask_tensor[0, 0].cpu().numpy(),
+            target_h=orig_np.shape[0],
+            target_w=orig_np.shape[1],
+        )
+        total_px = orig_np.shape[0] * orig_np.shape[1]
+        lesion_px = int(mask_resized.sum())
+        lesion_pct = lesion_px / total_px * 100
 
+        # 세그멘테이션에서 병변이 조금이라도 검출되면 hemorrhagic으로 override
+        if lesion_px > 0 and class_name == "normal":
+            hemorrhagic_idx = self.class_names.index("hemorrhagic") if "hemorrhagic" in self.class_names else pred_idx
+            result.class_idx = hemorrhagic_idx
+            result.class_name = "hemorrhagic"
+
+        if lesion_px > 0:
             result.lesion_mask = mask_resized
             result.lesion_area_px = lesion_px
-            result.lesion_area_pct = lesion_px / total_px * 100
+            result.lesion_area_pct = lesion_pct
 
         # ── 3단계: 시각화 ────────────────────────────────────────────────────
         from inference.visualization import visualize_result

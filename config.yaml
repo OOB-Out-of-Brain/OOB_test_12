@@ -4,11 +4,12 @@ data:
   aisd_path: ./data/raw/aisd
   tekno21_cache: ./data/raw/tekno21
   processed_path: ./data/processed
+  ct_hemorrhage_path: ./data/raw/ct_hemorrhage/computed-tomography-images-for-intracranial-hemorrhage-detection-and-segmentation-1.0.0
 
 classifier:
   model_name: efficientnet_b2
-  num_classes: 3
-  class_names: ["normal", "ischemic", "hemorrhagic"]
+  num_classes: 2
+  class_names: ["normal", "hemorrhagic"]
   image_size: 224
   batch_size: 16
   epochs: 50
@@ -16,7 +17,7 @@ classifier:
   weight_decay: 0.0001
   dropout_rate: 0.3
   label_smoothing: 0.1
-  early_stopping_patience: 10
+  early_stopping_patience: 50
   save_path: ./checkpoints/classifier
 
 segmentor:

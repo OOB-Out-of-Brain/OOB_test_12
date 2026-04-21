@@ -16,9 +16,7 @@ CLASS_COLORS = {
     "hemorrhagic": (255, 165,  50),
 }
 
-CONF_BAR_COLORS = ["#4caf50", "#f44336", "#ff9800"]
-
-CLASS_LABELS_EN = ["Normal", "Ischemic", "Hemorrhagic"]
+_BAR_PALETTE = ["#4caf50", "#ff9800", "#f44336", "#2196f3", "#9c27b0"]
 
 
 def visualize_result(orig_np: np.ndarray, result, alpha: float = 0.45) -> np.ndarray:
@@ -57,7 +55,9 @@ def _build_figure(orig_np: np.ndarray, result, alpha: float):
     ax = axes[1]
     ax.set_facecolor("#1a1a1a")
     probs = list(result.class_probs.values())
-    bars = ax.barh(CLASS_LABELS_EN, probs, color=CONF_BAR_COLORS, height=0.5)
+    labels_en = [k.capitalize() for k in result.class_probs.keys()]
+    bar_colors = _BAR_PALETTE[:len(probs)]
+    bars = ax.barh(labels_en, probs, color=bar_colors, height=0.5)
     for bar, p in zip(bars, probs):
         ax.text(min(p + 0.01, 0.95), bar.get_y() + bar.get_height() / 2,
                 f"{p:.1%}", va="center", color="white", fontsize=11, fontweight="bold")

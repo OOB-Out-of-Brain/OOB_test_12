@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from tqdm import tqdm
 import yaml
 
-from data.segmentation_dataset import build_segmentation_dataloaders
+from data.ct_hemorrhage_dataset import build_ct_seg_dataloaders
 from models.segmentor import StrokeSegmentor
 from training.metrics import DiceBCELoss, dice_score, iou_score
 
@@ -91,10 +91,10 @@ def main(args):
     print(f"\n디바이스: {device}")
     print(f"설정: epochs={epochs}, batch={batch_size}, lr={lr}, img={image_size}\n")
 
-    aisd_path = d["aisd_path"]
-    print(f"AISD 데이터셋 로딩: {aisd_path}")
-    train_loader, val_loader = build_segmentation_dataloaders(
-        aisd_root=aisd_path,
+    ct_path = d["ct_hemorrhage_path"]
+    print(f"CT Hemorrhage 데이터셋 로딩: {ct_path}")
+    train_loader, val_loader = build_ct_seg_dataloaders(
+        data_root=ct_path,
         image_size=image_size,
         batch_size=batch_size,
     )
