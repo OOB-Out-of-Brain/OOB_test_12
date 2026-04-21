@@ -1,0 +1,38 @@
+device: auto  # auto: mps > cuda > cpu 순서로 자동 선택
+
+data:
+  aisd_path: ./data/raw/aisd
+  tekno21_cache: ./data/raw/tekno21
+  processed_path: ./data/processed
+
+classifier:
+  model_name: efficientnet_b2
+  num_classes: 3
+  class_names: ["normal", "ischemic", "hemorrhagic"]
+  image_size: 224
+  batch_size: 16
+  epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  dropout_rate: 0.3
+  label_smoothing: 0.1
+  early_stopping_patience: 10
+  save_path: ./checkpoints/classifier
+
+segmentor:
+  encoder: resnet34
+  encoder_weights: imagenet
+  image_size: 256
+  batch_size: 8
+  epochs: 80
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  dice_weight: 0.6
+  bce_weight: 0.4
+  early_stopping_patience: 15
+  save_path: ./checkpoints/segmentor
+
+visualization:
+  lesion_color: [255, 100, 100]
+  overlay_alpha: 0.45
+  output_dpi: 150

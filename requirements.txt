@@ -1,0 +1,16 @@
+# SegVol venv 기반 (/Users/bari/SegVol/venv) — 이미 설치된 패키지:
+#   torch==2.11.0, torchvision==0.26.0, nibabel, numpy, pandas,
+#   pillow, pyyaml, scikit-learn, tqdm, matplotlib, monai,
+#   huggingface_hub, tensorboard
+
+# 추가 설치가 필요한 패키지 (SegVol venv에 pip install):
+segmentation-models-pytorch==0.5.0
+timm==1.0.26
+albumentations==1.4.24
+opencv-python-headless
+datasets==4.8.4
+seaborn
+
+# 설치 명령:
+# source /Users/bari/SegVol/venv/bin/activate
+# pip install segmentation-models-pytorch==0.5.0 timm==1.0.26 albumentations==1.4.24 opencv-python-headless datasets==4.8.4 seaborn
