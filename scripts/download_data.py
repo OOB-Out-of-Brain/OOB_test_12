@@ -73,9 +73,11 @@ def check_tekno21():
         import numpy as np
         labels = [int(ds[i][label_key]) for i in range(len(ds))]
         counts = np.bincount(labels)
+        # tekno21 실제 라벨: 0=Kanama(출혈), 1=iskemi(허혈), 2=İnme Yok(정상)
+        tk_names = ["Kanama(출혈)", "iskemi(허혈)", "İnme Yok(정상)"]
         for i, c in enumerate(counts):
-            from data.classifier_dataset import CLASS_NAMES
-            print(f"    {CLASS_NAMES[i]}: {c}개")
+            name = tk_names[i] if i < len(tk_names) else f"label_{i}"
+            print(f"    {name}: {c}개")
         return True
     except Exception as e:
         print(f"  ⚠️  다운로드 중 오류: {e}")
