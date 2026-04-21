@@ -1,12 +1,9 @@
 venv/
 __pycache__/
 *.pyc
-*.pth
 
 data/raw/
 data/processed/
-
-results/
 
 .DS_Store
 .vscode/
