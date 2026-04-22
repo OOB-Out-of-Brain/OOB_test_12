@@ -1,90 +1,145 @@
-"""CQ500 (qure.ai) 테스트 데이터셋 다운로드 시도.
+"""CQ500 (qure.ai) 자동 다운로드 — 테스트 전용.
 
-공식 배포 방식: 이메일 등록 후 S3 pre-signed URL 발급 (자동화 불가)
-대안: Academic Torrent, 공개 mirror 시도
+⚠️ CQ500 라이선스: CC BY-NC-SA 4.0 (학습 금지, 연구/평가 목적만).
 
-주의: CQ500은 **테스트 전용** 입니다. 학습에 사용하지 마세요.
+다운로드 방법 (자동 선택):
+  1. aria2c + Academic Torrents   (최고, 28GB, reads.csv 포함)
+  2. Kaggle API (crawford/qureai-headct, 40GB, reads.csv 별도 필요)
 
 실행:
     python scripts/download_cq500.py
+    python scripts/download_cq500.py --method torrent
+    python scripts/download_cq500.py --method kaggle
+
+필요 도구 (자동 감지):
+  - aria2c: `brew install aria2` 또는 `apt install aria2`
+  - kaggle:  `pip install kaggle` 후 ~/.kaggle/kaggle.json 설정
 """
 
-import sys, urllib.request
+import argparse, subprocess, shutil, sys, os
 from pathlib import Path
+
 
 CQ500_DIR = Path("./data/raw/cq500")
 
-# 시도해볼 URL 목록 (다 실패하면 수동 안내)
-CANDIDATE_URLS = [
-    # 공개 S3 mirror (예상, 실제로는 이메일 인증 필요할 수 있음)
-    "http://headctstudy.qure.ai/storage/dataset/CQ500.zip",
-    "https://s3.amazonaws.com/qureheadctstudy/CQ500.zip",
-]
+TORRENT_URL = "https://academictorrents.com/download/47e9d8aab761e75fd0a81982fa62bddf3a173831.torrent"
+MAGNET = ("magnet:?xt=urn:btih:47e9d8aab761e75fd0a81982fa62bddf3a173831"
+          "&dn=CQ500&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce")
 
-# reads.csv (라벨 파일)는 별도 공개
-READS_CSV_URL = "https://s3.amazonaws.com/qureheadctstudy/reads.csv"
+KAGGLE_DATASET = "crawford/qureai-headct"
 
 
-def _check(url: str, timeout: int = 10) -> bool:
-    req = urllib.request.Request(url, method="HEAD")
+def has(tool: str) -> bool:
+    return shutil.which(tool) is not None
+
+
+def download_torrent():
+    """aria2c로 Academic Torrents에서 CQ500 받기 (reads.csv 포함)."""
+    if not has("aria2c"):
+        print("  ❌ aria2c 없음. 설치:")
+        print("     macOS:  brew install aria2")
+        print("     Ubuntu: sudo apt install aria2")
+        return False
+
+    CQ500_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"\n🌀 aria2c로 CQ500 torrent 다운로드 시작 (~28GB, 몇 시간 소요)")
+    print(f"   저장: {CQ500_DIR}\n")
+
+    cmd = [
+        "aria2c",
+        "--dir", str(CQ500_DIR),
+        "--seed-time=0",
+        "--max-connection-per-server=8",
+        "--split=8",
+        "--bt-enable-lpd=true",
+        "--enable-dht=true",
+        "--summary-interval=10",
+        MAGNET,
+    ]
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return 200 <= r.status < 400
-    except Exception:
+        subprocess.run(cmd, check=True)
+        print("\n✅ torrent 다운 완료")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ aria2c 실패: {e}")
+        return False
+    except KeyboardInterrupt:
+        print("\n⚠️  중단됨 (이어받기 가능: 같은 명령 재실행)")
+        return False
+
+
+def download_kaggle():
+    """Kaggle API 로 CQ500 받기. reads.csv는 별도 필요."""
+    if not has("kaggle"):
+        print("  ❌ kaggle CLI 없음:  pip install kaggle")
+        return False
+    kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
+    if not kaggle_json.exists():
+        print(f"  ❌ 인증 없음. {kaggle_json} 에 Kaggle API token 필요")
+        print("     https://www.kaggle.com/settings/account → Create New Token")
+        return False
+
+    CQ500_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"\n📦 Kaggle {KAGGLE_DATASET} 다운로드 (~40GB, 몇 시간)")
+
+    cmd = ["kaggle", "datasets", "download", "-d", KAGGLE_DATASET,
+           "-p", str(CQ500_DIR), "--unzip"]
+    try:
+        subprocess.run(cmd, check=True)
+        print("\n✅ Kaggle 다운 완료")
+        print("⚠️  reads.csv(라벨)는 Kaggle 미러에 없음 — torrent 버전 권장")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ Kaggle 실패: {e}")
         return False
 
 
 def main():
-    CQ500_DIR.mkdir(parents=True, exist_ok=True)
+    p = argparse.ArgumentParser()
+    p.add_argument("--method", choices=["auto", "torrent", "kaggle"], default="auto")
+    args = p.parse_args()
 
     print("=" * 60)
-    print("  CQ500 (qure.ai) 테스트 데이터셋 준비")
-    print("  ⚠️  테스트 전용 — 학습에 사용하지 말 것")
+    print("  CQ500 외부 테스트 데이터셋 다운로드 (테스트 전용)")
     print("=" * 60)
 
-    # 1) reads.csv (라벨) 다운로드 시도
+    # 이미 있으면 스킵
     reads_csv = CQ500_DIR / "reads.csv"
-    if not reads_csv.exists():
-        print(f"\n[1] reads.csv 시도: {READS_CSV_URL}")
-        if _check(READS_CSV_URL):
-            try:
-                urllib.request.urlretrieve(READS_CSV_URL, reads_csv)
-                print(f"  ✅ 저장: {reads_csv}")
-            except Exception as e:
-                print(f"  ❌ 다운로드 실패: {e}")
+    qct_any = list(CQ500_DIR.glob("*/Unknown Study"))[:1] if CQ500_DIR.exists() else []
+    if reads_csv.exists() and qct_any:
+        n = len([d for d in CQ500_DIR.iterdir() if d.is_dir() and d.name.startswith("CQ500CT")])
+        print(f"✅ 이미 준비됨: {n}개 스캔 + reads.csv")
+        print(f"   평가:  python scripts/evaluate_cq500.py")
+        return
+
+    # 방법 선택
+    method = args.method
+    if method == "auto":
+        if has("aria2c"):
+            method = "torrent"
+        elif has("kaggle") and (Path.home() / ".kaggle" / "kaggle.json").exists():
+            method = "kaggle"
         else:
-            print(f"  ⚠️  URL 접근 불가")
+            print("""
+❌ 자동 다운로드 도구 없음. 둘 중 하나 설치하세요:
 
-    # 2) zip 후보 URL 테스트
-    print(f"\n[2] CQ500 zip 후보 URL 체크...")
-    for url in CANDIDATE_URLS:
-        ok = _check(url)
-        print(f"  {'✅' if ok else '❌'}  {url}")
-        if ok:
-            zip_path = CQ500_DIR / "CQ500.zip"
-            print(f"\n  다운로드 시작 → {zip_path}")
-            try:
-                urllib.request.urlretrieve(url, zip_path)
-                print(f"  ✅ 완료 (용량 매우 큼, 30GB+)")
-                return
-            except Exception as e:
-                print(f"  ❌ 다운로드 실패: {e}")
+  [옵션 1 — 추천] Academic Torrents (reads.csv 포함, 무인증)
+     macOS:   brew install aria2
+     Ubuntu:  sudo apt install aria2
 
-    # 3) 전부 실패 → 수동 안내
-    print(f"""
-[3] 자동 다운로드 실패. 수동 받으세요:
+  [옵션 2] Kaggle (40GB, Kaggle 계정 필요, reads.csv 별도)
+     pip install kaggle
+     https://www.kaggle.com/settings/account → API token 생성
+     → ~/.kaggle/kaggle.json 에 저장
 
-  1. 브라우저: http://headctstudy.qure.ai/dataset
-  2. 이메일 등록하면 S3 presigned URL 몇 개 이메일로 옴
-  3. 링크들(Batch zip 여러 개) 다운로드 → 전부 data/raw/cq500/ 에 압축 해제
-  4. 폴더 구조 예상:
-       data/raw/cq500/
-         CQ500CT1/Unknown Study/... *.dcm
-         CQ500CT2/...
-         ...
-         reads.csv
-  5. 이후 평가: python scripts/evaluate_cq500.py
+  이후 재실행: python scripts/download_cq500.py
 """)
+            sys.exit(1)
+
+    print(f"\n방법: {method}")
+    ok = download_torrent() if method == "torrent" else download_kaggle()
+    if ok:
+        print("\n이제 평가 실행:  python scripts/evaluate_cq500.py")
 
 
 if __name__ == "__main__":

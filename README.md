@@ -47,19 +47,22 @@ python demo.py --image path/to/ct.jpg # 추론
 
 | 데이터셋 | 출처 | 용량 | 자동 | 용도 |
 |---|---|---|---|---|
-| **CQ500** | qure.ai | ~30GB | ❌ (이메일 등록) | 외부 일반화 테스트 |
+| **CQ500** | qure.ai | ~28GB | ✅ **완전 자동** (aria2c 설치 후) | 외부 일반화 테스트 |
 
-CQ500 받는 법:
-1. http://headctstudy.qure.ai/dataset → 이메일 등록
-2. 받은 이메일의 링크(여러 Batch zip) 전부 다운로드
-3. `data/raw/cq500/` 에 압축 해제:
-   ```
-   data/raw/cq500/
-     CQ500CT1/Unknown Study/*.dcm
-     CQ500CT2/...
-     reads.csv    (3명 방사선과의사 판독 라벨)
-   ```
-4. 평가: `python scripts/evaluate_cq500.py`
+**한 줄로 받고 바로 평가:**
+
+```bash
+brew install aria2                        # 최초 1회 (macOS). Ubuntu는 sudo apt install aria2
+python scripts/download_cq500.py          # Academic Torrents 자동 (28GB, reads.csv 포함)
+python scripts/evaluate_cq500.py          # 491 스캔 평가 → results/cq500/ 에 FP/FN 리포트
+```
+
+aria2c 없으면 Kaggle 대안 (40GB, `pip install kaggle` + `~/.kaggle/kaggle.json` 필요):
+```bash
+python scripts/download_cq500.py --method kaggle
+```
+
+**라이선스**: CC BY-NC-SA 4.0 — 연구/평가 용도만, 학습 금지.
 
 ---
 
