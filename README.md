@@ -13,8 +13,8 @@
 
 ```bash
 # 1. 레포 클론
-git clone https://github.com/OOB-Out-of-Brain/OOB_test_5.git
-cd OOB_test_5
+git clone https://github.com/OOB-Out-of-Brain/OOB_test_006.git
+cd OOB_test_006
 
 # 2. 가상환경 + 패키지 설치
 python3 -m venv venv
@@ -109,7 +109,9 @@ NVIDIA GPU(CUDA)에서는 훨씬 빠릅니다.
 
 ---
 
-## 추론 데모 사용법
+## 테스트 / 추론 사용법
+
+### 단일 이미지 추론
 
 ```bash
 python demo.py --image path/to/ct.jpg
@@ -118,7 +120,26 @@ python demo.py --image path/to/ct.jpg
 python demo.py --image input.jpg --output my_result.png
 ```
 
-출력은 `원본 | 결과 이미지(출혈 위치 오버레이) + 분류 확률 차트` 로 구성됩니다.
+출력: `원본 | 결과 이미지(출혈 위치 오버레이) + 분류 확률 차트`
+
+### 폴더 배치 테스트
+
+폴더 안의 모든 이미지 자동 추론:
+
+```bash
+python scripts/run_batch_test.py --input-dir path/to/folder --output-dir results/
+```
+
+### 판독 로직 (pipeline)
+
+1. 분류기가 normal/hemorrhagic 확률 출력
+2. 분할기가 병변 마스크 생성
+3. **최종 판독 규칙**:
+   - 병변 비율 **≤ 1%** → `normal` (미세 오탐 무시)
+   - 병변 비율 **> 1%** & 분류기 normal → `hemorrhagic` 으로 override (분류기 놓친 경우 세그가 보완)
+   - 나머지 → 분류기 결과 유지
+
+이 규칙은 [`inference/pipeline.py`](inference/pipeline.py) 에서 조정 가능.
 
 ---
 

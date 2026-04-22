@@ -147,11 +147,17 @@ class StrokePipeline:
         lesion_px = int(mask_resized.sum())
         lesion_pct = lesion_px / total_px * 100
 
-        # 세그멘테이션에서 병변이 조금이라도 검출되면 hemorrhagic으로 override
-        if lesion_px > 0 and class_name == "normal":
-            hemorrhagic_idx = self.class_names.index("hemorrhagic") if "hemorrhagic" in self.class_names else pred_idx
-            result.class_idx = hemorrhagic_idx
-            result.class_name = "hemorrhagic"
+        # 최종 판독 규칙:
+        #   병변 비율 ≤ 1% → normal (미세 오탐은 무시)
+        #   병변 비율 >  1% & 분류기 normal → hemorrhagic으로 override
+        if lesion_pct <= 1.0:
+            if "normal" in self.class_names:
+                result.class_idx = self.class_names.index("normal")
+                result.class_name = "normal"
+        elif class_name == "normal":
+            if "hemorrhagic" in self.class_names:
+                result.class_idx = self.class_names.index("hemorrhagic")
+                result.class_name = "hemorrhagic"
 
         if lesion_px > 0:
             result.lesion_mask = mask_resized
