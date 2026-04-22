@@ -147,17 +147,11 @@ class StrokePipeline:
         lesion_px = int(mask_resized.sum())
         lesion_pct = lesion_px / total_px * 100
 
-        # 최종 판독 규칙:
-        #   병변 비율 ≤ 1% → normal (미세 오탐은 무시)
-        #   병변 비율 >  1% & 분류기 normal → hemorrhagic으로 override
-        if lesion_pct <= 1.0:
-            if "normal" in self.class_names:
-                result.class_idx = self.class_names.index("normal")
-                result.class_name = "normal"
-        elif class_name == "normal":
-            if "hemorrhagic" in self.class_names:
-                result.class_idx = self.class_names.index("hemorrhagic")
-                result.class_name = "hemorrhagic"
+        # 최종 판독 규칙 (A 규칙, OOB_test_7):
+        #   분류기 결과를 그대로 신뢰.
+        #   세그멘터 마스크는 "위치 시각화 용도"로만 사용 (분류에 개입 X).
+        #   - Val set 2089장에서 Acc 96.03%, Sens 93.32%, Spec 97.64%
+        #   - 1% threshold를 쓰면 작은 출혈 72% 놓침 (OOB_test_6 참조)
 
         if lesion_px > 0:
             result.lesion_mask = mask_resized
