@@ -150,10 +150,46 @@ def build_ct_classifier_dataloaders(data_root, image_size, batch_size,
     return train_loader, val_loader, class_weights
 
 
+def _collect_bhsd_seg(processed_dir: str):
+    """BHSD 전처리된 (image_png, mask_png, patient_id) 리스트."""
+    import csv
+    root = Path(processed_dir)
+    idx_csv = root / "index.csv"
+    if not idx_csv.exists():
+        return []
+    samples = []
+    with open(idx_csv) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            img_p = root / row["image_path"]
+            msk_p = root / row["mask_path"]
+            stem = img_p.stem
+            pid = stem.rsplit("_s", 1)[0]
+            samples.append((img_p, msk_p, pid))
+    return samples
+
+
 def build_ct_seg_dataloaders(data_root, image_size, batch_size,
-                              val_ratio=0.2, seed=42):
+                              val_ratio=0.2, seed=42,
+                              bhsd_processed_dir="./data/processed/bhsd"):
     _, seg_samples = _collect_samples(data_root)
     train_s, val_s = _patient_split(seg_samples, val_ratio, seed)
+
+    # BHSD 세그멘터 샘플도 추가
+    bhsd_samples = _collect_bhsd_seg(bhsd_processed_dir)
+    if bhsd_samples:
+        b_pids = sorted({s[2] for s in bhsd_samples})
+        rng = np.random.RandomState(seed + 1)
+        rng.shuffle(b_pids)
+        n_val_b = max(1, int(len(b_pids) * val_ratio))
+        val_pids = set(b_pids[:n_val_b])
+        b_train = [(s[0], s[1]) for s in bhsd_samples if s[2] not in val_pids]
+        b_val   = [(s[0], s[1]) for s in bhsd_samples if s[2] in val_pids]
+        train_s = train_s + b_train
+        val_s   = val_s + b_val
+        print(f"  BHSD 세그 샘플 추가: train={len(b_train)}, val={len(b_val)}")
+
+    print(f"  세그 합계: train={len(train_s)}, val={len(val_s)}")
 
     train_ds = CTSegDataset(train_s, image_size, "train")
     val_ds   = CTSegDataset(val_s,   image_size, "val")

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 
 data/raw/tekno21/
+data/raw/bhsd/
 data/processed/
 
 .DS_Store

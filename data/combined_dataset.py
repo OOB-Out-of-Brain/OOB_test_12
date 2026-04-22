@@ -50,9 +50,10 @@ def _transforms(image_size: int, split: str) -> A.Compose:
 
 class CombinedDataset(Dataset):
     """
-    samples: list of tuples.
-      CT 샘플: ("ct", Path(img), label)
-      tekno21 샘플: ("tk", hf_index, label)
+    samples: list of tuples (source, ref, label)
+      "ct"   : ref = Path(img)
+      "tk"   : ref = HF index
+      "bhsd" : ref = Path(img)   # 전처리된 PNG 슬라이스
     """
 
     def __init__(self, samples, hf_dataset, image_size, split):
@@ -65,9 +66,9 @@ class CombinedDataset(Dataset):
 
     def __getitem__(self, idx):
         source, ref, label = self.samples[idx]
-        if source == "ct":
+        if source == "ct" or source == "bhsd":
             image = np.array(Image.open(ref).convert("RGB"))
-        else:
+        else:  # tekno21
             item = self.hf[ref]
             img = item["image"]
             if not isinstance(img, Image.Image):
@@ -104,6 +105,28 @@ def _collect_ct(data_root):
     return samples
 
 
+def _collect_bhsd(processed_dir: str = "./data/processed/bhsd"):
+    """BHSD 전처리된 슬라이스 index.csv 로드.
+    모든 슬라이스는 hemorrhagic (label=1). 환자 ID로 split 가능하게 반환.
+    반환: [(source, img_path, label, patient_id_str), ...]"""
+    root = Path(processed_dir)
+    idx_csv = root / "index.csv"
+    if not idx_csv.exists():
+        print(f"  ⚠️ BHSD index 없음: {idx_csv} (preprocess_bhsd.py 먼저 실행)")
+        return []
+    samples = []
+    import csv
+    with open(idx_csv) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            img_path = root / row["image_path"]
+            # 파일명에서 환자 ID 추출 (ID_xxx_ID_yyy_sNNN.png → ID_xxx_ID_yyy)
+            stem = img_path.stem
+            pid = stem.rsplit("_s", 1)[0]
+            samples.append(("bhsd", img_path, 1, pid))  # 모두 hemorrhagic
+    return samples
+
+
 def _collect_tekno21(cache_dir):
     """tekno21 로드 후 (source, hf_idx, label, tekno21_idx) 리스트 반환.
     0=Kanama(출혈)→1, 2=İnme Yok(정상)→0, 1=iskemi는 제외."""
@@ -123,7 +146,8 @@ def _collect_tekno21(cache_dir):
 
 
 def build_combined_dataloaders(ct_root, tekno21_cache, image_size, batch_size,
-                                val_ratio=0.2, seed=42, num_workers=2):
+                                val_ratio=0.2, seed=42, num_workers=2,
+                                bhsd_processed_dir="./data/processed/bhsd"):
     print("  CT Hemorrhage 로딩...")
     ct_all = _collect_ct(ct_root)
     # CT는 환자 단위 분리 (leakage 방지)
@@ -146,8 +170,19 @@ def build_combined_dataloaders(ct_root, tekno21_cache, image_size, batch_size,
     tk_train = [(tk_all[i][0], tk_all[i][1], tk_all[i][2]) for i in tk_train_i]
     tk_val   = [(tk_all[i][0], tk_all[i][1], tk_all[i][2]) for i in tk_val_i]
 
-    train_samples = ct_train + tk_train
-    val_samples   = ct_val + tk_val
+    print("  BHSD 로딩...")
+    bhsd_all = _collect_bhsd(bhsd_processed_dir)
+    # BHSD는 환자(볼륨) 단위 split
+    bhsd_pids = sorted({s[3] for s in bhsd_all})
+    rng_b = np.random.RandomState(seed + 1)
+    rng_b.shuffle(bhsd_pids)
+    n_val_b = max(1, int(len(bhsd_pids) * val_ratio))
+    bhsd_val_set = set(bhsd_pids[:n_val_b])
+    bhsd_train = [(s[0], s[1], s[2]) for s in bhsd_all if s[3] not in bhsd_val_set]
+    bhsd_val   = [(s[0], s[1], s[2]) for s in bhsd_all if s[3] in bhsd_val_set]
+
+    train_samples = ct_train + tk_train + bhsd_train
+    val_samples   = ct_val + tk_val + bhsd_val
 
     # 통계 출력
     def _dist(ss):
