@@ -17,7 +17,7 @@
 
 ## 1. Quick Start
 
-### 공통 준비
+### 공통 준비 (clone → 학습 직전까지 한 번에)
 ```bash
 git clone https://github.com/OOB-Out-of-Brain/OOB_test_10.git
 cd OOB_test_10
@@ -26,8 +26,13 @@ python3 -m venv venv
 source venv/bin/activate               # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-python scripts/download_data.py        # 학습용 4개 데이터셋 ~3.3GB 자동
+python scripts/setup_all.py            # 학습용 데이터 4종 ~3.3GB 자동 다운로드
+# CQ500 외부 테스트셋까지 같이 받으려면:
+python scripts/setup_all.py --with-cq500   # +28GB, aria2c 필요
 ```
+`setup_all.py` 내부에서 호출되는 스크립트:
+- `scripts/download_data.py` — tekno21(HF) / CT Hemorrhage(PhysioNet) / AISD synthetic(로컬 생성) / BHSD(HF) 전처리까지 자동 처리
+- `scripts/download_cq500.py` — (`--with-cq500` 지정 시) Academic Torrents 자동
 
 ### 2-class 학습 경로 (기존)
 ```bash
@@ -42,6 +47,10 @@ python training/train_classifier_3class.py --epochs 100   # ≈ 3시간 20분 (M
 python training/train_segmentor_3class.py  --epochs 80    # ≈ 1시간
 python scripts/run_batch_test_3class.py --input-dir /path/to/images --output-dir results/my_run
 ```
+
+> 체크포인트(.pth)는 용량이 커서 레포에 포함되지 않는다. 위 학습 스크립트를
+> 돌리면 각각 `checkpoints/classifier_3class/`, `checkpoints/segmentor_3class/`
+> 경로에 자동 저장된다.
 
 ---
 
@@ -244,6 +253,7 @@ OOB_test_10/
 │  └─ visualization.py
 │
 ├─ scripts/
+│  ├─ setup_all.py                 # ⭐ 원샷 데이터 셋업 (신규)
 │  ├─ download_data.py             # 학습용 4개 데이터셋
 │  ├─ download_bhsd.py / preprocess_bhsd.py
 │  ├─ generate_synthetic_aisd.py   # AISD 합성 데이터 (허혈 마스크)
