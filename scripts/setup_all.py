@@ -2,7 +2,7 @@
 
 신규 사용자가 레포를 clone 한 후 학습 준비를 끝내기 위한 진입점.
 체크포인트는 학습 완료 후 생성되므로 이 스크립트 대상 아님 —
-`training/train_classifier_3class.py` 등을 직접 실행해서 만들면 된다.
+`training/train_classifier.py` 등을 직접 실행해서 만들면 된다.
 
 기본 (학습용 데이터 4종):
     python scripts/setup_all.py
@@ -43,12 +43,12 @@ def main():
         print("  ✅ 데이터 준비 완료")
         print("=" * 60)
         print("\n학습 시작:")
-        print("  # 2-class (기존)")
-        print("  python training/train_classifier.py")
-        print("  python training/train_segmentor.py")
-        print("  # 3-class (신규)")
-        print("  python training/train_classifier_3class.py --epochs 100")
-        print("  python training/train_segmentor_3class.py  --epochs 80")
+        print("  python training/train_classifier.py --epochs 50")
+        print("  python training/train_segmentor.py  --epochs 80")
+        print("\n추론/평가:")
+        print("  python scripts/run_batch_test.py --input-dir imgs/ --output-dir results/")
+        print("  python scripts/evaluate_valset.py")
+        print("  python scripts/evaluate_cq500.py   # CQ500 받은 경우")
     else:
         print("  ⚠️ 일부 단계 실패 — 위 로그 확인")
         print("=" * 60)

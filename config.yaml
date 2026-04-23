@@ -8,8 +8,8 @@ data:
 
 classifier:
   model_name: efficientnet_b2
-  num_classes: 2
-  class_names: ["normal", "hemorrhagic"]
+  num_classes: 3
+  class_names: ["normal", "ischemic", "hemorrhagic"]
   image_size: 224
   batch_size: 16
   epochs: 50

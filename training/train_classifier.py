@@ -1,9 +1,14 @@
 """
-tekno21 데이터셋으로 분류 모델 학습.
+3-class 분류 학습 스크립트 (normal / ischemic / hemorrhagic).
+
+tekno21 라벨 체계를 기준으로 CT Hemorrhage, BHSD도 동일 3-class 공간으로 매핑하여 학습.
+  - normal=0, ischemic=1, hemorrhagic=2
+  - tekno21 iskemi(허혈) 샘플을 제거하지 않고 전부 사용
 
 실행:
     python training/train_classifier.py
     python training/train_classifier.py --epochs 30 --batch_size 8
+    python training/train_classifier.py --tekno21-only    # CT/BHSD 제외, tekno21만 학습
 """
 
 import argparse
@@ -20,7 +25,11 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import yaml
 
-from data.combined_dataset import build_combined_dataloaders, CLASS_NAMES as CT_CLASS_NAMES
+from data.combined_dataset import (
+    build_combined_dataloaders,
+    CLASS_NAMES,
+    NUM_CLASSES,
+)
 from models.classifier import StrokeClassifier
 from training.metrics import accuracy, cls_report, conf_matrix
 
@@ -88,24 +97,28 @@ def main(args):
     batch_size = args.batch_size or c["batch_size"]
     lr = args.lr or c["learning_rate"]
     image_size = c["image_size"]
-    save_path = Path(c["save_path"])
+    save_path = Path(args.save_path or "./checkpoints/classifier")
     save_path.mkdir(parents=True, exist_ok=True)
 
     device = get_device()
     print(f"\n디바이스: {device}")
-    print(f"설정: epochs={epochs}, batch={batch_size}, lr={lr}, img={image_size}\n")
+    print(f"설정: epochs={epochs}, batch={batch_size}, lr={lr}, img={image_size}")
+    print(f"클래스({NUM_CLASSES}): {CLASS_NAMES}\n")
 
     ct_path = cfg["data"]["ct_hemorrhage_path"]
     tk_cache = cfg["data"]["tekno21_cache"]
-    print(f"데이터셋 로딩 (CT Hemorrhage + tekno21)")
+    print("데이터셋 로딩 (3-class: tekno21 + CT Hemorrhage + BHSD)")
     train_loader, val_loader, class_weights = build_combined_dataloaders(
         ct_root=ct_path, tekno21_cache=tk_cache,
         image_size=image_size, batch_size=batch_size,
+        use_ct=not args.tekno21_only,
+        use_bhsd=not args.tekno21_only,
     )
-    print(f"학습: {len(train_loader.dataset)}개  검증: {len(val_loader.dataset)}개\n")
+    print(f"학습: {len(train_loader.dataset)}개  검증: {len(val_loader.dataset)}개")
+    print(f"class_weights = {class_weights.tolist()}\n")
 
     model = StrokeClassifier(
-        num_classes=c["num_classes"],
+        num_classes=NUM_CLASSES,
         pretrained=True,
         dropout_rate=c["dropout_rate"],
     ).to(device)
@@ -137,7 +150,8 @@ def main(args):
                 "epoch": epoch,
                 "model_state": model.state_dict(),
                 "val_acc": val_acc,
-                "class_names": CT_CLASS_NAMES,
+                "class_names": CLASS_NAMES,
+                "num_classes": NUM_CLASSES,
                 "config": c,
             }, save_path / "best_classifier.pth")
             print(f"  → 모델 저장 (best val acc: {best_acc:.4f})")
@@ -148,9 +162,12 @@ def main(args):
                 break
 
     print(f"\n최종 검증 리포트 (best model):")
-    print(cls_report(val_preds, val_labels, CT_CLASS_NAMES))
-    print("Confusion matrix:")
-    print(conf_matrix(val_preds, val_labels))
+    print(cls_report(val_preds, val_labels, CLASS_NAMES))
+    print("Confusion matrix (rows=true, cols=pred):")
+    print("           " + "  ".join(f"{n:>11}" for n in CLASS_NAMES))
+    cm = conf_matrix(val_preds, val_labels)
+    for name, row in zip(CLASS_NAMES, cm):
+        print(f"  {name:>9} " + "  ".join(f"{v:>11d}" for v in row))
     print(f"\n학습 완료. 저장 경로: {save_path / 'best_classifier.pth'}")
 
 
@@ -159,5 +176,9 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--save_path", type=str, default=None,
+                        help="기본: ./checkpoints/classifier")
+    parser.add_argument("--tekno21-only", action="store_true",
+                        help="CT Hemorrhage / BHSD 제외하고 tekno21만으로 학습")
     args = parser.parse_args()
     main(args)

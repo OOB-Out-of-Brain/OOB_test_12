@@ -1,17 +1,15 @@
-"""학습에 쓰이지 않은 val set 2089장 상세 평가 (FP/FN 리포트 + 샘플 저장).
+"""Val set 3-class 상세 평가 (FP/FN/오분류 리포트).
 
-CQ500 다운로드 전까지의 대체 평가:
-- val set은 학습 중 **검증용으로만** 쓰였고 backprop 안 됨 → 독립 평가 가능
-- Patient-level split으로 leakage 없음 (patient ID 기준 분리됨)
+학습 중 backprop에 사용되지 않은 검증 세트 전체(≈2361장)를 환자 단위 split 기준으로 평가.
+3-class confusion matrix + per-class precision/recall + 오분류 샘플 저장.
 
-출력 (results_5/valset/):
-  - summary.csv (파일별 결과)
-  - metrics.txt (sensitivity/specificity/FP rate/FN rate)
-  - false_positives/ (정상인데 출혈이라 오탐한 샘플 이미지)
-  - false_negatives/ (출혈인데 놓친 샘플 이미지)
+출력 (results/valset_3class/):
+  - summary.csv
+  - metrics.txt
+  - errors/gt_X_pred_Y/ 폴더들 (잘못 예측된 샘플 시각화)
 """
 
-import sys, csv, random
+import sys, csv
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -25,17 +23,18 @@ from data.combined_dataset import build_combined_dataloaders, CLASS_NAMES
 from inference.pipeline import StrokePipeline
 
 
-OUT_DIR = Path("./results_5/valset")
-MAX_ERROR_SAMPLES = 30  # FP/FN 각각 저장할 최대 샘플 수
+OUT_DIR = Path("./results/valset_3class")
+MAX_ERRORS_PER_BUCKET = 20  # 오분류 버킷당 최대 저장 샘플 수
 
 
-def save_error_image(overlay_or_orig, out_path: Path, label: str, conf: float, lesion_pct: float):
-    if overlay_or_orig is None:
+def save_sample(overlay, out_path: Path, gt_name: str, pred_name: str,
+                conf: float, lesion_str: str):
+    if overlay is None:
         return
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(overlay_or_orig)
-    color = "red" if "FP" in label else "orange"
-    ax.set_title(f"{label}  conf={conf:.1%}  lesion={lesion_pct:.1f}%", color=color)
+    ax.imshow(overlay)
+    ax.set_title(f"GT={gt_name} → Pred={pred_name} ({conf:.1%})  {lesion_str}",
+                 color="red")
     ax.axis("off")
     plt.tight_layout()
     plt.savefig(out_path, dpi=120, bbox_inches="tight")
@@ -44,12 +43,10 @@ def save_error_image(overlay_or_orig, out_path: Path, label: str, conf: float, l
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    fp_dir = OUT_DIR / "false_positives"
-    fn_dir = OUT_DIR / "false_negatives"
-    fp_dir.mkdir(exist_ok=True)
-    fn_dir.mkdir(exist_ok=True)
+    err_root = OUT_DIR / "errors"
+    err_root.mkdir(exist_ok=True)
 
-    print("Val set 로딩...")
+    print("Val set 로딩 (3-class)...")
     _, val_loader, _ = build_combined_dataloaders(
         ct_root="./data/raw/ct_hemorrhage/computed-tomography-images-for-intracranial-hemorrhage-detection-and-segmentation-1.0.0",
         tekno21_cache="./data/raw/tekno21",
@@ -59,22 +56,23 @@ def main():
     samples = val_ds.samples  # [(source, ref, label), ...]
     print(f"총 {len(samples)} 샘플 평가\n")
 
+    seg_ckpt = Path("./checkpoints/segmentor/best_segmentor.pth")
     pipe = StrokePipeline(
         classifier_ckpt="./checkpoints/classifier/best_classifier.pth",
-        segmentor_ckpt="./checkpoints/segmentor/best_segmentor.pth",
+        segmentor_ckpt=str(seg_ckpt) if seg_ckpt.exists() else None,
     )
 
-    tp = tn = fp = fn = 0
-    fp_saved = fn_saved = 0
+    n_classes = len(CLASS_NAMES)
+    cm = np.zeros((n_classes, n_classes), dtype=np.int64)
+    err_counts = {}  # (gt, pred) → saved count
     summary_rows = []
 
-    hf = val_ds.hf  # tekno21용
+    hf = val_ds.hf
     for i, (source, ref, gt) in enumerate(samples):
-        # 이미지 numpy로
         if source in ("ct", "bhsd"):
             img = np.array(Image.open(ref).convert("RGB"))
             name = Path(ref).name
-        else:  # tekno21
+        else:
             item = hf[ref]
             im = item["image"]
             if not isinstance(im, Image.Image):
@@ -83,81 +81,93 @@ def main():
             name = f"tk_{ref}.png"
 
         r = pipe.run(img)
-        pred = 1 if r.class_name == "hemorrhagic" else 0
+        pred = r.class_idx
+        cm[gt, pred] += 1
 
-        if gt == 1 and pred == 1: tp += 1
-        elif gt == 0 and pred == 0: tn += 1
-        elif gt == 0 and pred == 1:
-            fp += 1
-            if fp_saved < MAX_ERROR_SAMPLES:
-                save_error_image((r.overlay_image if r.overlay_image is not None else img),
-                                 fp_dir / f"fp_{fp_saved:03d}_{source}_{name}",
-                                 "FALSE POSITIVE (normal → hemorrhagic)",
-                                 r.confidence, r.lesion_area_pct)
-                fp_saved += 1
-        elif gt == 1 and pred == 0:
-            fn += 1
-            if fn_saved < MAX_ERROR_SAMPLES:
-                save_error_image((r.overlay_image if r.overlay_image is not None else img),
-                                 fn_dir / f"fn_{fn_saved:03d}_{source}_{name}",
-                                 "FALSE NEGATIVE (hemorrhagic → normal)",
-                                 r.confidence, r.lesion_area_pct)
-                fn_saved += 1
+        summary_rows.append([
+            source, name,
+            CLASS_NAMES[gt], CLASS_NAMES[pred],
+            f"{r.confidence:.3f}",
+            f"{r.class_probs.get('normal', 0):.3f}",
+            f"{r.class_probs.get('ischemic', 0):.3f}",
+            f"{r.class_probs.get('hemorrhagic', 0):.3f}",
+            f"{r.ischemic_area_pct:.2f}",
+            f"{r.hemorrhagic_area_pct:.2f}",
+        ])
 
-        summary_rows.append([source, name, gt, pred,
-                              f"{r.confidence:.3f}",
-                              f"{r.lesion_area_pct:.2f}"])
+        if gt != pred:
+            bucket_key = (gt, pred)
+            n_saved = err_counts.get(bucket_key, 0)
+            if n_saved < MAX_ERRORS_PER_BUCKET:
+                bucket_dir = err_root / f"gt_{CLASS_NAMES[gt]}_pred_{CLASS_NAMES[pred]}"
+                bucket_dir.mkdir(parents=True, exist_ok=True)
+                lesion_str = ""
+                if r.ischemic_area_px:
+                    lesion_str += f"isch={r.ischemic_area_px}px "
+                if r.hemorrhagic_area_px:
+                    lesion_str += f"hem={r.hemorrhagic_area_px}px"
+                save_sample(
+                    r.overlay_image if r.overlay_image is not None else img,
+                    bucket_dir / f"{n_saved:03d}_{source}_{name}",
+                    CLASS_NAMES[gt], CLASS_NAMES[pred],
+                    r.confidence, lesion_str,
+                )
+                err_counts[bucket_key] = n_saved + 1
 
-        if (i + 1) % 100 == 0:
-            print(f"  {i+1}/{len(samples)}  TP={tp} TN={tn} FP={fp} FN={fn}")
+        if (i + 1) % 200 == 0:
+            acc_so_far = np.trace(cm) / max(cm.sum(), 1)
+            print(f"  {i+1}/{len(samples)}  acc={acc_so_far:.4f}")
 
-    # summary.csv
     with open(OUT_DIR / "summary.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["source", "file", "gt", "pred", "confidence", "lesion_pct"])
+        w.writerow(["source", "file", "gt", "pred", "confidence",
+                    "p_normal", "p_ischemic", "p_hemorrhagic",
+                    "ischemic_pct", "hemorrhagic_pct"])
         w.writerows(summary_rows)
 
-    # metrics
-    total = tp + tn + fp + fn
-    sens = tp / max(tp + fn, 1)
-    spec = tn / max(tn + fp, 1)
-    ppv = tp / max(tp + fp, 1)
-    npv = tn / max(tn + fn, 1)
-    acc = (tp + tn) / max(total, 1)
-    fpr = fp / max(tn + fp, 1)
-    fnr = fn / max(tp + fn, 1)
+    # 메트릭
+    total = int(cm.sum())
+    acc = np.trace(cm) / max(total, 1)
+
+    per_class = []
+    for c in range(n_classes):
+        tp = int(cm[c, c])
+        fn = int(cm[c, :].sum() - tp)
+        fp = int(cm[:, c].sum() - tp)
+        recall = tp / max(tp + fn, 1)
+        precision = tp / max(tp + fp, 1)
+        support = int(cm[c, :].sum())
+        per_class.append((CLASS_NAMES[c], precision, recall, support))
+
+    # 보고서
+    header = "GT\\Pred     " + "  ".join(f"{n:>12}" for n in CLASS_NAMES)
+    cm_lines = [header]
+    for c in range(n_classes):
+        row = f"{CLASS_NAMES[c]:<10}  " + "  ".join(f"{cm[c, p]:>12d}" for p in range(n_classes))
+        cm_lines.append(row)
+
+    pc_lines = [f"{'class':<12} {'precision':>10} {'recall':>10} {'support':>10}"]
+    for name, pr, rc, sup in per_class:
+        pc_lines.append(f"{name:<12} {pr:>10.4f} {rc:>10.4f} {sup:>10d}")
 
     report = f"""\
-Val set 평가 리포트 (총 {total} 샘플)
+Val set 3-class 평가 (총 {total} 샘플)
 =============================================
 
-분포:
-  Normal      : {tn + fp}개
-  Hemorrhagic : {tp + fn}개
+Confusion matrix (rows=GT, cols=Pred)
+{chr(10).join(cm_lines)}
 
-Confusion matrix:
-                예측 normal    예측 hemorrhagic
-실제 normal       {tn:>6}         {fp:>6}  ← 오탐(FP)
-실제 hemorrhagic  {fn:>6}         {tp:>6}  ← 누락(FN)
+Per-class metrics
+{chr(10).join(pc_lines)}
 
---- 주요 지표 ---
-Sensitivity (Recall)     : {sens:.4f}  (출혈 탐지율)
-Specificity              : {spec:.4f}  (정상 식별율)
-PPV (Precision)          : {ppv:.4f}
-NPV                      : {npv:.4f}
-Accuracy                 : {acc:.4f}
+Overall Accuracy : {acc:.4f}
 
---- 핵심 오탐/누락 ---
-Normal 오탐율 (FP rate)     : {fpr:.4f}  ← 낮을수록 좋음
-Hemorrhagic 누락율 (FN rate): {fnr:.4f}  ← 낮을수록 좋음 (임상적으로 중요)
-
-샘플 이미지 저장:
-  FP {fp_saved}개 → {fp_dir}
-  FN {fn_saved}개 → {fn_dir}
+오분류 샘플 저장 경로:
+  {err_root} (버킷별 최대 {MAX_ERRORS_PER_BUCKET}개)
 """
     print("\n" + report)
     (OUT_DIR / "metrics.txt").write_text(report)
-    print(f"\n저장: {OUT_DIR}")
+    print(f"저장: {OUT_DIR}")
 
 
 if __name__ == "__main__":

@@ -145,7 +145,7 @@ def _patient_split(samples, val_ratio, seed):
     return train, val
 
 
-def build_seg_3class_dataloaders(ct_root: str, aisd_root: str,
+def build_seg_dataloaders(ct_root: str, aisd_root: str,
                                   bhsd_processed_dir: str,
                                   image_size: int, batch_size: int,
                                   val_ratio: float = 0.2, seed: int = 42,
