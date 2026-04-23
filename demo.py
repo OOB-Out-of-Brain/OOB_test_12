@@ -4,6 +4,7 @@
     python demo.py --image path/to/ct.png
     python demo.py --image path/to/ct.png --output results/result.png
     python demo.py --image path/to/ct.png --cls_ckpt checkpoints/classifier/best_classifier.pth
+    python demo.py --image path/to/ct.png --seg_ckpt checkpoints/segmentor/best_segmentor.pth
 """
 
 import argparse

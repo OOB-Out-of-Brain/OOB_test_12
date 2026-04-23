@@ -21,30 +21,34 @@ import matplotlib.pyplot as plt
 
 from data.combined_dataset import build_combined_dataloaders, CLASS_NAMES
 from inference.pipeline import StrokePipeline
+from inference.visualization import _build_figure
 
 
 OUT_DIR = Path("./results/valset_3class")
-MAX_ERRORS_PER_BUCKET = 20  # 오분류 버킷당 최대 저장 샘플 수
+MAX_ERRORS_PER_BUCKET = 20  # 오분류 버킷당 최대 저장 샘플 수 (errors/ 폴더에 중복 저장용)
 
 
-def save_sample(overlay, out_path: Path, gt_name: str, pred_name: str,
-                conf: float, lesion_str: str):
-    if overlay is None:
-        return
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.imshow(overlay)
-    ax.set_title(f"GT={gt_name} → Pred={pred_name} ({conf:.1%})  {lesion_str}",
-                 color="red")
-    ax.axis("off")
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=120, bbox_inches="tight")
-    plt.close()
+def save_dual_panel(orig_np, result, out_path: Path, gt_name: str, dpi: int = 100):
+    """brain_test 스타일 3-panel figure (원본 + 3-class 확률바 + 병변 overlay) + GT/Pred 표시."""
+    fig = _build_figure(orig_np, result, alpha=0.45)
+    mark = "✓" if gt_name == result.class_name else "✗"
+    fig.suptitle(
+        f"GT={gt_name}  →  Pred={result.class_name.upper()} ({result.confidence:.1%}) {mark}",
+        color="white", fontsize=14, fontweight="bold", y=0.99,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor="black")
+    plt.close(fig)
 
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     err_root = OUT_DIR / "errors"
     err_root.mkdir(exist_ok=True)
+    # 모든 예측 결과를 pred 클래스별 폴더에 저장 (correct/wrong 표시 포함)
+    pred_root = OUT_DIR / "predicted"
+    for c in CLASS_NAMES:
+        (pred_root / c).mkdir(parents=True, exist_ok=True)
 
     print("Val set 로딩 (3-class)...")
     _, val_loader, _ = build_combined_dataloaders(
@@ -95,22 +99,25 @@ def main():
             f"{r.hemorrhagic_area_pct:.2f}",
         ])
 
+        # 모든 샘플을 pred 폴더에 저장 (dual-panel: 원본 + 확률바 + overlay)
+        pred_dir = pred_root / CLASS_NAMES[pred]
+        mark = "OK" if gt == pred else "XX"
+        save_dual_panel(
+            img, r,
+            pred_dir / f"{mark}_gt-{CLASS_NAMES[gt]}_{source}_{i:05d}_{Path(name).stem}.png",
+            CLASS_NAMES[gt],
+        )
+
+        # 오분류 샘플은 errors/ 폴더에도 버킷별로 중복 저장 (상한 있음)
         if gt != pred:
             bucket_key = (gt, pred)
             n_saved = err_counts.get(bucket_key, 0)
             if n_saved < MAX_ERRORS_PER_BUCKET:
                 bucket_dir = err_root / f"gt_{CLASS_NAMES[gt]}_pred_{CLASS_NAMES[pred]}"
-                bucket_dir.mkdir(parents=True, exist_ok=True)
-                lesion_str = ""
-                if r.ischemic_area_px:
-                    lesion_str += f"isch={r.ischemic_area_px}px "
-                if r.hemorrhagic_area_px:
-                    lesion_str += f"hem={r.hemorrhagic_area_px}px"
-                save_sample(
-                    r.overlay_image if r.overlay_image is not None else img,
-                    bucket_dir / f"{n_saved:03d}_{source}_{name}",
-                    CLASS_NAMES[gt], CLASS_NAMES[pred],
-                    r.confidence, lesion_str,
+                save_dual_panel(
+                    img, r,
+                    bucket_dir / f"{n_saved:03d}_{source}_{Path(name).stem}.png",
+                    CLASS_NAMES[gt],
                 )
                 err_counts[bucket_key] = n_saved + 1
 

@@ -23,10 +23,27 @@ import matplotlib.pyplot as plt
 import pydicom
 
 from inference.pipeline import StrokePipeline
+from inference.visualization import _build_figure
 
 
 CQ500_DIR = Path("./data/raw/cq500")
 OUT_DIR = Path("./results/cq500_3class")
+
+
+def save_scan_panel(orig_np, result, out_path: Path, gt_tag: str, dpi: int = 100):
+    """대표 슬라이스에 3-panel figure (원본 + 확률바 + overlay) 저장."""
+    if orig_np is None or result is None:
+        return
+    fig = _build_figure(orig_np, result, alpha=0.45)
+    mark = "✓" if (gt_tag == "hem" and result.class_name == "hemorrhagic") or \
+                  (gt_tag == "nonhem" and result.class_name != "hemorrhagic") else "✗"
+    fig.suptitle(
+        f"GT={gt_tag}  →  Pred={result.class_name.upper()} ({result.confidence:.1%}) {mark}",
+        color="white", fontsize=14, fontweight="bold", y=0.99,
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor="black")
+    plt.close(fig)
 
 
 def apply_brain_window(hu_arr: np.ndarray, center: int = 40, width: int = 80) -> np.ndarray:
@@ -85,7 +102,9 @@ def evaluate_scan(pipe: StrokePipeline, scan_dir: Path,
     max_conf_hem = 0.0
     max_hem_pct = 0.0
     max_isch_pct = 0.0
-    best_overlay = None
+    # 클래스별 가장 확신 높은 슬라이스의 (이미지, result) 보존
+    best_by_cls = {"normal": None, "ischemic": None, "hemorrhagic": None}
+    best_conf_by_cls = {"normal": 0.0, "ischemic": 0.0, "hemorrhagic": 0.0}
 
     for dcm in sel:
         try:
@@ -99,10 +118,11 @@ def evaluate_scan(pipe: StrokePipeline, scan_dir: Path,
             max_hem_pct = r.hemorrhagic_area_pct
         if r.ischemic_area_pct > max_isch_pct:
             max_isch_pct = r.ischemic_area_pct
-        if r.class_name == "hemorrhagic":
-            if r.confidence > max_conf_hem:
-                max_conf_hem = r.confidence
-                best_overlay = r.overlay_image
+        if r.class_name == "hemorrhagic" and r.confidence > max_conf_hem:
+            max_conf_hem = r.confidence
+        if r.confidence > best_conf_by_cls[r.class_name]:
+            best_conf_by_cls[r.class_name] = r.confidence
+            best_by_cls[r.class_name] = (rgb, r)
 
     # 스캔 단위 결정 규칙
     if "hemorrhagic" in per_slice_pred:
@@ -112,13 +132,19 @@ def evaluate_scan(pipe: StrokePipeline, scan_dir: Path,
     else:
         pred_cls = "normal"
 
+    # scan 대표 슬라이스: pred_cls 대표 우선, 없으면 hem > isch > normal 순
+    best_pair = (best_by_cls[pred_cls]
+                 or best_by_cls["hemorrhagic"]
+                 or best_by_cls["ischemic"]
+                 or best_by_cls["normal"])
+
     return {
         "pred_cls": pred_cls,
         "n_slices": len(sel),
         "max_conf": max_conf_hem,
         "max_hem_pct": max_hem_pct,
         "max_isch_pct": max_isch_pct,
-        "best_overlay": best_overlay,
+        "best_pair": best_pair,  # (rgb_image, PipelineResult) or None
     }
 
 
@@ -150,8 +176,29 @@ def main():
             else None,
     )
 
-    scan_dirs = sorted([d for d in CQ500_DIR.iterdir() if d.is_dir()])
-    print(f"스캔 폴더: {len(scan_dirs)}개")
+    # 스캔 폴더 찾기: 최대 2단계(qct01/CQ500CT101 CQ500CT101) 까지 내려가서 CQ500CT* 디렉토리 수집.
+    # reads.csv 키가 "CQ500-CT-101" 이라 폴더명 "CQ500CT101 CQ500CT101" → "CQ500-CT-101" 로 정규화.
+    import re as _re
+    def normalize_scan_name(folder_name: str) -> str:
+        # "CQ500CT101 CQ500CT101" → "CQ500CT101"
+        first = folder_name.split()[0] if folder_name else folder_name
+        # "CQ500CT101" → "CQ500-CT-101"
+        m = _re.match(r"CQ500CT(\d+)", first)
+        if m:
+            return f"CQ500-CT-{m.group(1)}"
+        return first
+
+    scan_dirs = []
+    for p in CQ500_DIR.rglob("CQ500CT*"):
+        if p.is_dir():
+            scan_dirs.append(p)
+    scan_dirs.sort()
+    print(f"스캔 폴더: {len(scan_dirs)}개 (재귀 수집)")
+
+    # 모든 스캔을 예측 클래스별로 저장
+    pred_root = OUT_DIR / "predicted"
+    for c in ["normal", "ischemic", "hemorrhagic"]:
+        (pred_root / c).mkdir(parents=True, exist_ok=True)
 
     summary_csv = OUT_DIR / "summary.csv"
     with open(summary_csv, "w", newline="") as f:
@@ -163,10 +210,12 @@ def main():
         per_class_pred = {"normal": 0, "ischemic": 0, "hemorrhagic": 0}
         fp_dir = OUT_DIR / "false_positives"
         fp_count = 0
+        unmatched = 0
 
         for i, scan_dir in enumerate(scan_dirs, 1):
-            name = scan_dir.name
+            name = normalize_scan_name(scan_dir.name)
             if name not in gt_map:
+                unmatched += 1
                 continue
             gt_hem = gt_map[name]
             r = evaluate_scan(pipe, scan_dir)
@@ -182,8 +231,27 @@ def main():
                         f"{r['max_hem_pct']:.2f}", f"{r['max_isch_pct']:.2f}",
                         r["n_slices"]])
 
+            # 모든 스캔에 대해 대표 슬라이스 3-panel figure 저장
+            pair = r.get("best_pair")
+            if pair is not None:
+                rgb, res = pair
+                mark = "OK" if (gt_hem == pred_hem) else "XX"
+                gt_tag = "hem" if gt_hem == 1 else "nonhem"
+                save_scan_panel(
+                    rgb, res,
+                    pred_root / pred_cls / f"{mark}_gt-{gt_tag}_{name}.png",
+                    gt_tag,
+                )
+
+            # FP 샘플은 별도 폴더에도 중복 저장 (상한)
             if gt_hem == 0 and pred_hem == 1 and fp_count < 20:
-                save_error_sample(name, r["best_overlay"], fp_dir)
+                if pair is not None:
+                    rgb, res = pair
+                    save_scan_panel(
+                        rgb, res,
+                        fp_dir / f"{name}.png",
+                        "nonhem",
+                    )
                 fp_count += 1
 
             if i % 10 == 0:
