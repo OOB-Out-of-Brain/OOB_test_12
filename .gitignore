@@ -16,3 +16,5 @@ checkpoints/*/*.npz
 results_4/
 results_5/
 results_5_B_rule_backup/
+logs/
+results/
