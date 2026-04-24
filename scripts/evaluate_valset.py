@@ -150,11 +150,14 @@ Per-class metrics
 
 Overall Accuracy : {acc:.4f}
 
-결과 버킷 저장 경로:
-  {OUT_DIR}/correct/{{normal,ischemic,hemorrhagic}}/   (정답)
-  {OUT_DIR}/wrong/false_positive/                       (정상→병변 오탐)
-  {OUT_DIR}/wrong/missed/                               (병변→정상 놓침)
-  {OUT_DIR}/wrong/lesion_confusion/                     (출혈↔허혈 혼동)
+결과 버킷 저장 경로 (방향성 9-버킷):
+  {OUT_DIR}/correct/{{normal,ischemic,hemorrhagic}}/         (정답)
+  {OUT_DIR}/wrong/normal_to_ischemic/                         (정상→허혈 오탐)
+  {OUT_DIR}/wrong/normal_to_hemorrhagic/                      (정상→출혈 오탐)
+  {OUT_DIR}/wrong/ischemic_to_normal/                         (허혈→정상 놓침)
+  {OUT_DIR}/wrong/hemorrhagic_to_normal/                      (출혈→정상 놓침)
+  {OUT_DIR}/wrong/ischemic_to_hemorrhagic/                    (허혈→출혈 혼동)
+  {OUT_DIR}/wrong/hemorrhagic_to_ischemic/                    (출혈→허혈 혼동)
 """
     print("\n" + report)
     (OUT_DIR / "metrics.txt").write_text(report)

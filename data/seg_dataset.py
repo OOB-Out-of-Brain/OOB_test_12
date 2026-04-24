@@ -134,6 +134,28 @@ def _collect_aisd(aisd_root: str):
     return out
 
 
+def _collect_tekno21_pseudo(pseudo_dir: str):
+    """Grad-CAM pseudo-mask 폴더 (scripts/generate_ischemic_pseudo_masks.py 산출).
+    모든 샘플 ischemic.
+    반환: [(img_path, mask_path, ISCHEMIC, patient_id_str), ...]"""
+    root = Path(pseudo_dir)
+    idx_csv = root / "index.csv"
+    if not idx_csv.exists():
+        print(f"  ⚠️ tekno21 pseudo-mask 없음: {idx_csv}")
+        return []
+    out = []
+    with open(idx_csv) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            img = root / row["image_path"]
+            msk = root / row["mask_path"]
+            if not (img.exists() and msk.exists()):
+                continue
+            # tekno21 은 환자 ID 없음 → 각 샘플을 독립 ID 로 취급 (stratified 가 아니라 random split)
+            out.append((img, msk, ISCHEMIC, f"tkp_{img.stem}"))
+    return out
+
+
 def _patient_split(samples, val_ratio, seed):
     pids = sorted({s[3] for s in samples})
     rng = np.random.RandomState(seed)
@@ -150,7 +172,8 @@ def build_seg_dataloaders(ct_root: str, aisd_root: str,
                                   image_size: int, batch_size: int,
                                   val_ratio: float = 0.2, seed: int = 42,
                                   num_workers: int = 2,
-                                  include_ct_normal: bool = True):
+                                  include_ct_normal: bool = True,
+                                  tekno21_pseudo_dir: str = "./data/processed/tekno21_isch_pseudo"):
     """
     Args:
         include_ct_normal: CT Hemorrhage의 정상 슬라이스를 함께 학습 (배경만 있는 pair)
@@ -164,15 +187,19 @@ def build_seg_dataloaders(ct_root: str, aisd_root: str,
     print("  BHSD 세그 로딩...")
     bhsd_all = _collect_bhsd_seg(bhsd_processed_dir)
 
-    print("  AISD (ischemic) 세그 로딩...")
+    print("  AISD (ischemic, 합성) 세그 로딩...")
     aisd_all = _collect_aisd(aisd_root)
+
+    print("  tekno21 pseudo-ischemic (Grad-CAM) 로딩...")
+    tkp_all = _collect_tekno21_pseudo(tekno21_pseudo_dir)
 
     ct_tr, ct_va = _patient_split(ct_all, val_ratio, seed)
     bh_tr, bh_va = _patient_split(bhsd_all, val_ratio, seed + 1) if bhsd_all else ([], [])
     ai_tr, ai_va = _patient_split(aisd_all, val_ratio, seed + 2) if aisd_all else ([], [])
+    tkp_tr, tkp_va = _patient_split(tkp_all, val_ratio, seed + 3) if tkp_all else ([], [])
 
-    train_samples = ct_tr + bh_tr + ai_tr
-    val_samples   = ct_va + bh_va + ai_va
+    train_samples = ct_tr + bh_tr + ai_tr + tkp_tr
+    val_samples   = ct_va + bh_va + ai_va + tkp_va
 
     def _dist(ss):
         c = np.bincount([s[2] for s in ss], minlength=3)

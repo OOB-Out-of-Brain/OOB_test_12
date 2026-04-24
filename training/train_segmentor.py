@@ -150,12 +150,13 @@ def main(args):
     batch_size = args.batch_size or s["batch_size"]
     lr = args.lr or s["learning_rate"]
     image_size = s["image_size"]
+    encoder = args.encoder or s["encoder"]
     save_path = Path(args.save_path or "./checkpoints/segmentor")
     save_path.mkdir(parents=True, exist_ok=True)
 
     device = get_device()
     print(f"\n디바이스: {device}")
-    print(f"설정: epochs={epochs}, batch={batch_size}, lr={lr}, img={image_size}")
+    print(f"설정: epochs={epochs}, batch={batch_size}, lr={lr}, img={image_size}, encoder={encoder}")
     print(f"세그 클래스({SEG_NUM_CLASSES}): {SEG_CLASS_NAMES}\n")
 
     ct_path = d["ct_hemorrhage_path"]
@@ -171,7 +172,7 @@ def main(args):
     print(f"학습: {len(train_loader.dataset)}개  검증: {len(val_loader.dataset)}개\n")
 
     model = StrokeSegmentor(
-        encoder_name=s["encoder"],
+        encoder_name=encoder,
         encoder_weights=s["encoder_weights"],
         num_classes=SEG_NUM_CLASSES,
     ).to(device)
@@ -218,7 +219,8 @@ def main(args):
                 "val_lesion_dice": lesion_mean,
                 "class_names": SEG_CLASS_NAMES,
                 "num_classes": SEG_NUM_CLASSES,
-                "config": s,
+                "encoder": encoder,
+                "config": {**s, "encoder": encoder},
             }, save_path / "best_segmentor.pth")
             print(f"  → 모델 저장 (best lesion Dice: {best_score:.4f})")
         else:
@@ -237,5 +239,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--save_path", type=str, default=None,
                         help="기본: ./checkpoints/segmentor")
+    parser.add_argument("--encoder", type=str, default="efficientnet-b0",
+                        help="세그 인코더 백본 (기본: efficientnet-b0)")
     args = parser.parse_args()
     main(args)

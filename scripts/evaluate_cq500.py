@@ -6,8 +6,9 @@
 출력 (results/cq500_3class/):
   - summary.csv           (scan, gt_hem, pred_cls, pred_hem, max_conf, max_hem_pct, max_isch_pct)
   - metrics.txt           (hemorrhagic 이진 + 3-class 분포)
-  - false_positives/      (실제 normal인데 hem 오탐)
-  - false_negatives/      (실제 hem인데 놓침)
+  - correct/{normal,hemorrhagic}/
+  - wrong/{normal_to_ischemic, normal_to_hemorrhagic,
+           hemorrhagic_to_normal, hemorrhagic_to_ischemic}/
 """
 
 import sys, csv
