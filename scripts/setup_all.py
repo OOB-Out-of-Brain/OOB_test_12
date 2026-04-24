@@ -31,7 +31,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  OOB_test_10 데이터 셋업")
+    print("  OOB_test_11 데이터 셋업")
     print("=" * 60)
 
     rc = run([sys.executable, str(HERE / "download_data.py")])

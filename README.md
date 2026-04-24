@@ -12,8 +12,8 @@
 ## 1. Quick Start
 
 ```bash
-git clone https://github.com/OOB-Out-of-Brain/OOB_test_10.git
-cd OOB_test_10
+git clone https://github.com/OOB-Out-of-Brain/OOB_test_11.git
+cd OOB_test_11
 
 python3 -m venv venv
 source venv/bin/activate                 # Windows: venv\Scripts\activate
@@ -179,7 +179,7 @@ python scripts/evaluate_cq500.py
 ## 6. 폴더 구조
 
 ```
-OOB_test_10/
+OOB_test_11/
 ├─ README.md                   # 이 문서
 ├─ HOWTRAIN.md                 # 학습 상세 가이드
 ├─ config.yaml                 # 하이퍼파라미터 (num_classes=3)
