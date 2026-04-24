@@ -52,8 +52,9 @@ def save_visualization(orig_np: np.ndarray, result, output_path: str,
 
 
 def _build_figure(orig_np: np.ndarray, result, alpha: float):
+    # 3-panel 고정 (원본 + 확률바 + 매핑). 세그 마스크가 비어 있어도 매핑 패널은 원본 그대로 표시.
     has_lesion = (result.ischemic_area_px > 0) or (result.hemorrhagic_area_px > 0)
-    ncols = 3 if has_lesion else 2
+    ncols = 3
 
     fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 5.5), facecolor="black")
     fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.08, wspace=0.12)
@@ -88,33 +89,34 @@ def _build_figure(orig_np: np.ndarray, result, alpha: float):
         color=title_norm, fontsize=13, fontweight="bold", pad=8,
     )
 
-    # 3. Lesion overlay
-    if has_lesion:
-        ax = axes[2]
-        overlay = orig_np.copy().astype(np.float32)
-        if result.ischemic_mask is not None:
-            overlay = _blend(overlay, result.ischemic_mask, ISCHEMIC_RGB, alpha)
-        if result.hemorrhagic_mask is not None:
-            overlay = _blend(overlay, result.hemorrhagic_mask, HEMORRHAGIC_RGB, alpha)
-        ax.imshow(np.clip(overlay, 0, 255).astype(np.uint8))
+    # 3. Lesion overlay (병변 없어도 원본 그대로 + "No lesion detected" 표시)
+    ax = axes[2]
+    overlay = orig_np.copy().astype(np.float32)
+    patches = []
+    if result.ischemic_mask is not None:
+        overlay = _blend(overlay, result.ischemic_mask, ISCHEMIC_RGB, alpha)
+        _draw_contours(ax, result.ischemic_mask, "#2196f3")
+        patches.append(mpatches.Patch(
+            color=[c / 255 for c in ISCHEMIC_RGB],
+            label=f"Ischemic {result.ischemic_area_pct:.1f}%"))
+    if result.hemorrhagic_mask is not None:
+        overlay = _blend(overlay, result.hemorrhagic_mask, HEMORRHAGIC_RGB, alpha)
+        _draw_contours(ax, result.hemorrhagic_mask, "#ff5252")
+        patches.append(mpatches.Patch(
+            color=[c / 255 for c in HEMORRHAGIC_RGB],
+            label=f"Hemorrhagic {result.hemorrhagic_area_pct:.1f}%"))
+    ax.imshow(np.clip(overlay, 0, 255).astype(np.uint8))
 
-        patches = []
-        if result.ischemic_mask is not None:
-            _draw_contours(ax, result.ischemic_mask, "#2196f3")
-            patches.append(mpatches.Patch(
-                color=[c / 255 for c in ISCHEMIC_RGB],
-                label=f"Ischemic {result.ischemic_area_pct:.1f}%"))
-        if result.hemorrhagic_mask is not None:
-            _draw_contours(ax, result.hemorrhagic_mask, "#ff5252")
-            patches.append(mpatches.Patch(
-                color=[c / 255 for c in HEMORRHAGIC_RGB],
-                label=f"Hemorrhagic {result.hemorrhagic_area_pct:.1f}%"))
+    if has_lesion:
         ax.set_title("Lesion Overlay", color="white", fontsize=13, pad=8)
-        if patches:
-            ax.legend(handles=patches, loc="lower right",
-                      facecolor="#222", edgecolor="#555",
-                      labelcolor="white", fontsize=10)
-        ax.axis("off")
+    else:
+        ax.set_title("Lesion Overlay — No lesion detected by segmentor",
+                     color="#aaaaaa", fontsize=13, pad=8)
+    if patches:
+        ax.legend(handles=patches, loc="lower right",
+                  facecolor="#222", edgecolor="#555",
+                  labelcolor="white", fontsize=10)
+    ax.axis("off")
 
     fig.suptitle("Brain CT Stroke Analysis (3-class)",
                  color="white", fontsize=15, fontweight="bold", y=0.97)
